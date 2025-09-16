@@ -1,0 +1,142 @@
+version: "3.9"
+
+services:
+  # ===================== BROKER MQTT =====================
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "${MOSQUITTO_PORT:-1883}:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  # ===================== API (FastAPI) =====================
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: api
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    environment:
+      # FastAPI / runtime
+      UVICORN_HOST: ${UVICORN_HOST:-0.0.0.0}
+      UVICORN_PORT: ${UVICORN_PORT:-8000}
+      API_TZ: ${API_TZ:-UTC}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      SQLITE_PATH: ${SQLITE_PATH:-/data/telemetry.db}
+      VMAX_MPS: ${VMAX_MPS:-12}
+      # MQTT
+      MQTT_URL: ${MQTT_URL:-mqtt://mosquitto:1883}
+      MQTT_TOPIC: ${MQTT_TOPIC:-telemetry/combined/1}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+    volumes:
+      - api-data:/data
+    ports:
+      - "${API_PORT:-8000}:8000"
+    user: "${UID:-1000}:${GID:-1000}"
+
+  # ===================== FRONTEND (Vite) =====================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      VITE_API_HTTP_URL: ${VITE_API_HTTP_URL:-http://localhost:8000}
+      VITE_API_WS_URL: ${VITE_API_WS_URL:-ws://localhost:8000/ws}
+      # opcional (para hot-reload com bind mounts em alguns SOs):
+      # CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${FRONT_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+    user: "${UID:-1000}:${GID:-1000}"
+
+  # ===================== SIMULADOR (perfil: sim) =====================
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: simulator
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_URL: ${MQTT_URL:-mqtt://mosquitto:1883}
+      MQTT_TOPIC: ${MQTT_TOPIC:-telemetry/combined/1}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      SIM_INTERVAL_MS: ${SIM_INTERVAL_MS:-200}
+      SIM_SRC: ${SIM_SRC:-sim}
+    profiles: ["sim"]
+    user: "${UID:-1000}:${GID:-1000}"
+
+  # ===================== FEEDER HTTP (perfil: http) =====================
+  feeder_http:
+    build:
+      context: ./feeder_http
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: feeder_http
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_INGEST_URL: ${API_INGEST_URL:-http://api:8000/api/v1/telemetry/ingest}
+      FEEDER_INTERVAL_MS: ${FEEDER_INTERVAL_MS:-200}
+      SIM_SRC: ${SIM_SRC:-sim}
+    profiles: ["http"]
+    user: "${UID:-1000}:${GID:-1000}"
+
+  # ===================== SERIAL BRIDGE (perfil: serial) =====================
+  serial_bridge:
+    build:
+      context: ./serial_bridge
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: serial_bridge
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+      - api
+    environment:
+      BRIDGE_MODE: ${BRIDGE_MODE:-mqtt}   # mqtt | http
+      SERIAL_PORT: ${SERIAL_PORT:-/dev/ttyACM0}
+      SERIAL_BAUD: ${SERIAL_BAUD:-115200}
+      MQTT_URL: ${MQTT_URL:-mqtt://mosquitto:1883}
+      MQTT_TOPIC: ${MQTT_TOPIC:-telemetry/combined/1}
+      API_INGEST_URL: ${API_INGEST_URL:-http://api:8000/api/v1/telemetry/ingest}
+    devices:
+      - "${SERIAL_PORT:-/dev/ttyACM0}:${SERIAL_PORT:-/dev/ttyACM0}"
+    # se precisar de grupos adicionais para /dev/tty*, adicione:
+    # group_add:
+    #   - "dialout"
+    profiles: ["serial"]
+    user: "${UID:-1000}:${GID:-1000}"
+
+volumes:
+  api-data:
+  mosquitto-data:
+  mosquitto-log:
