@@ -3,8 +3,15 @@ FROM node:20-slim
 ARG UID=1000
 ARG GID=1000
 
-# cria usuário "app" com mesmo UID/GID do host
-RUN groupadd -g ${GID} app && useradd -m -u ${UID} -g ${GID} app
+# Só cria grupo/usuário se o GID/UID NÃO existirem; caso existam, 
+# usamos os IDs numéricos direto
+RUN set -eux; \
+    if ! getent group "${GID}" >/dev/null; then \
+        groupadd -g "${GID}" app; \
+    fi; \
+    if ! getent passwd "${UID}" >/dev/null; then \
+        useradd -m -u "${UID}" -g "${GID}" app; \
+    fi
 
 WORKDIR /app
 
@@ -14,9 +21,6 @@ RUN npm ci || npm install
 
 # copia o resto para builds de produção; em dev, será sobrescrito por bind mount
 COPY . .
-
-# garante ownership (útil quando copiar arquivos dentro da imagem)
-RUN chown -R ${UID}:${GID} /app
 
 USER ${UID}:${GID}
 EXPOSE 5173
