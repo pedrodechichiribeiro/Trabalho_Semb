@@ -8,12 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN groupadd -g ${GID} app && useradd -m -u ${UID} -g ${GID} app
 
 WORKDIR /app
-COPY requirements.txt .  # deve conter paho-mqtt
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py ./main.py
+COPY sim.py ./sim.py
 
 RUN mkdir -p /app && chown -R ${UID}:${GID} /app
 USER ${UID}:${GID}
 
-CMD ["python", "-u", "main.py"]
+CMD ["python", "-u", "sim.py"]

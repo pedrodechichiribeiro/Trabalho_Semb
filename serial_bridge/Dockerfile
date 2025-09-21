@@ -12,10 +12,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py ./main.py
+COPY bridge.py ./bridge.py
 RUN chown -R ${UID}:${GID} /app
 USER ${UID}:${GID}
 
 # acesso ao /dev/ttyACM* virá do host (bind), então o user do container
 # deve ter permissão; se precisar, acrescente grupos no compose (e.g. dialout)
-CMD ["python", "-u", "main.py"]
+CMD ["python", "-u", "bridge.py"]

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ===================== BROKER MQTT =====================
   mosquitto:
@@ -9,14 +7,14 @@ services:
     ports:
       - "${MOSQUITTO_PORT:-1883}:1883"
     volumes:
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
       - mosquitto-log:/mosquitto/log
 
   # ===================== API (FastAPI) =====================
   api:
     build:
-      context: ./api
+      context: ./backend
       dockerfile: Dockerfile
       args:
         UID: ${UID:-1000}
@@ -127,14 +125,16 @@ services:
       SERIAL_BAUD: ${SERIAL_BAUD:-115200}
       MQTT_URL: ${MQTT_URL:-mqtt://mosquitto:1883}
       MQTT_TOPIC: ${MQTT_TOPIC:-telemetry/combined/1}
-      API_INGEST_URL: ${API_INGEST_URL:-http://api:8000/api/v1/telemetry/ingest}
+      API_INGEST_URL: ${API_INGEST_URL:-http://api:8000/api/v1/telemetry_raw/ingest}
     devices:
-      - "${SERIAL_PORT:-/dev/ttyACM0}:${SERIAL_PORT:-/dev/ttyACM0}"
-    # se precisar de grupos adicionais para /dev/tty*, adicione:
-    # group_add:
-    #   - "dialout"
+      - "/dev/ttyACM0:/dev/ttyACM0"
+    group_add:
+      - "dialout"
+    device_cgroup_rules:
+      - 'c 166:* rmw'   # 166 é o major típico do ttyACM
     profiles: ["serial"]
     user: "${UID:-1000}:${GID:-1000}"
+
 
 volumes:
   api-data:
