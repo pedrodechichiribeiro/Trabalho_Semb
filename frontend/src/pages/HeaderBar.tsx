@@ -3,7 +3,6 @@ import { AppBar, Toolbar, Typography, Chip, Stack } from "@mui/material";
 import { telemetryLive } from "../store/telemetryLive";
 
 export default function HeaderBar() {
-  // Seleciona apenas o que precisa (valores primitivos -> estáveis)
   const connected = telemetryLive.useState((s) => s.connected);
   const paused = telemetryLive.useState((s) => s.paused);
 
