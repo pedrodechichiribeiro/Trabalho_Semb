@@ -1,92 +1,113 @@
-import React, { useMemo } from "react";
-import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip, useMap } from "react-leaflet";
-import { LatLngBounds } from "leaflet";
-import { Box } from "@mui/material";
+import { useEffect, useRef } from "react";
+import L, { Map as LeafletMap, Marker, Polyline } from "leaflet";
 
-/**
- * points: array de [longitude, latitude]
- * Renderiza:
- * - Trilho (Polyline)
- * - Ponto atual (CircleMarker)
- * - Tooltip permanente no último ponto com "lat, lon"
- * - Overlay no canto com "lat, lon"
- * - Auto-fit para a extensão dos pontos
- */
-function FitBounds({ latlngs }: { latlngs: [number, number][] }) {
-  const map = useMap();
-  React.useEffect(() => {
-    if (!latlngs.length) return;
-    if (latlngs.length === 1) {
-      map.setView(latlngs[0], Math.max(14, map.getZoom() || 14));
-    } else {
-      map.fitBounds(new LatLngBounds(latlngs));
+type Props = {
+  /** [lat, lon] */
+  points: [number, number][];
+  /** máximo de pontos no traço (default 300) */
+  maxPathPoints?: number;
+};
+
+function throttle<T extends (...args: any[]) => void>(fn: T, wait: number) {
+  let last = 0;
+  let timer: number | undefined;
+  let savedArgs: any[] | null = null;
+  return (...args: Parameters<T>) => {
+    const now = Date.now();
+    const remaining = wait - (now - last);
+    savedArgs = args;
+    if (remaining <= 0) {
+      last = now;
+      fn(...(savedArgs as any[]));
+      savedArgs = null;
+    } else if (!timer) {
+      timer = window.setTimeout(() => {
+        last = Date.now();
+        fn(...(savedArgs as any[]));
+        savedArgs = null;
+        timer = undefined;
+      }, remaining);
     }
-  }, [latlngs, map]);
-  return null;
+  };
 }
 
-export default function GpsMap({ points }: { points: [number, number][] }) {
-  // Converte [lon, lat] -> [lat, lon] (Leaflet usa [lat, lng])
-  const latlngs = useMemo<[number, number][]>(() => {
-    return points.map(([lon, lat]) => [lat, lon]);
-  }, [points]);
+export default function GpsMap({ points, maxPathPoints = 300 }: Props) {
+  const mapRef = useRef<LeafletMap | null>(null);
+  const markerRef = useRef<Marker | null>(null);
+  const pathRef = useRef<Polyline | null>(null);
+  const divRef = useRef<HTMLDivElement | null>(null);
 
-  // Centro default (São Paulo) caso vazio
-  const center: [number, number] = latlngs.at(-1) || [-23.56, -46.65];
+  useEffect(() => {
+    const el = divRef.current!;
+    // cria mapa uma vez — com Canvas renderer (mais leve para RT)
+    const map = L.map(el, {
+      preferCanvas: true,
+      zoomControl: true,
+      attributionControl: true,
+      center: [-23.5585, -46.6493],
+      zoom: 17,
+      renderer: L.canvas(),
+    });
+    mapRef.current = map;
 
-  // Último ponto formatado (overlay + tooltip)
-  const last = latlngs.at(-1);
-  const lastLabel =
-    last ? `${last[0].toFixed(6)}, ${last[1].toFixed(6)}` : "—";
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OSM",
+    }).addTo(map);
 
-  return (
-    <Box sx={{ position: "relative", height: "100%", width: "100%" }}>
-      <MapContainer
-        center={center}
-        zoom={15}
-        scrollWheelZoom
-        style={{ height: "100%", width: "100%", borderRadius: 8 }}
-      >
-        <TileLayer
-          // OpenStreetMap padrão (livre)
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-        />
+    // polyline inicial
+    pathRef.current = L.polyline([], { color: "#1976d2", weight: 3 }).addTo(map);
+    // marker inicial
+    markerRef.current = L.circleMarker([0, 0], {
+      radius: 5,
+      color: "#1976d2",
+      weight: 2,
+      fillOpacity: 0.6,
+    }).addTo(map);
 
-        {/* trilha */}
-        {latlngs.length >= 2 && (
-          <Polyline positions={latlngs as any} />
-        )}
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize({ animate: false });
+    });
+    resizeObserver.observe(el);
 
-        {/* último ponto + tooltip permanente com "lat, lon" */}
-        {last && (
-          <CircleMarker center={last} radius={6}>
-            <Tooltip direction="top" permanent offset={[0, -6]}>
-              {lastLabel}
-            </Tooltip>
-          </CircleMarker>
-        )}
+    return () => {
+      resizeObserver.disconnect();
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+      pathRef.current = null;
+    };
+  }, []);
 
-        <FitBounds latlngs={latlngs} />
-      </MapContainer>
+  // aplica atualizações com throttle para não renderizar a cada amostra
+  useEffect(() => {
+    if (!mapRef.current || !pathRef.current || !markerRef.current) return;
+    const map = mapRef.current;
+    const path = pathRef.current;
+    const marker = markerRef.current;
 
-      {/* overlay fixo com lat, lon (canto inferior direito) */}
-      <Box
-        sx={{
-          position: "absolute",
-          right: 8,
-          bottom: 8,
-          bgcolor: "rgba(255,255,255,0.92)",
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 1.5,
-          px: 1,
-          py: 0.5,
-          fontSize: 12,
-          boxShadow: 1,
-        }}
-      >
-        <strong>Posição:</strong> {lastLabel}
-      </Box>
-    </Box>
-  );
+    const apply = throttle((pts: [number, number][]) => {
+      if (!pts || pts.length === 0) return;
+      const slice = pts.length > maxPathPoints ? pts.slice(-maxPathPoints) : pts;
+
+      // atualiza polyline e marker
+      path.setLatLngs(slice as any);
+      const last = slice[slice.length - 1];
+      marker.setLatLng(last as any);
+
+      // mantém o último ponto no viewport se ele sair muito
+      // (não “voa” o mapa toda hora, só ajusta quando realmente sai)
+      const bounds = path.getBounds();
+      if (!map.getBounds().contains(last as any)) {
+        map.fitBounds(bounds, { padding: [20, 20] });
+      }
+    }, 200); // ~5 Hz
+
+    apply(points);
+
+    // também roda quando a lista muda bastante
+    // (o throttle já limita a taxa real de desenho)
+  }, [points, maxPathPoints]);
+
+  return <div ref={divRef} style={{ width: "100%", height: 360, borderRadius: 6 }} />;
 }
