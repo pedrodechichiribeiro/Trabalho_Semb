@@ -4,9 +4,9 @@ import { Card as MuiCard, CardHeader, CardContent, Chip, Box } from "@mui/materi
 type Props = {
   title: string;
   children: React.ReactNode;
-  sourceLabel?: string; // "Carro" | "Central" | etc
+  sourceLabel?: string;
   action?: React.ReactNode;
-  height?: number;      // SE informado, fixa a altura do conteúdo
+  height?: number;
 };
 
 export default function Card({ title, children, sourceLabel, action, height }: Props) {
