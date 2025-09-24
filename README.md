@@ -1,4 +1,4 @@
-a# Telemetria (car + central) — Backend + Frontend
+# Telemetria (car + central) — Backend + Frontend
 
 Sistema completo de **coleta, processamento e visualização** de telemetria para um carro RC controlado por duas **STM32F411 “Black Pill”**:
 
